@@ -1,0 +1,19 @@
+# Starter review
+
+| # | Where | What is wrong | How to notice | How it is fixed |
+|---|---|---|---|---|
+| 1 | `compute_late_minutes` | Uses the server's/local datetime zone and replaces the instant's hour without constructing the shift's IST instant; overnight and UTC cases are wrong. | Punch in at 09:45 IST for a 09:30 shift. | Convert shift start and attendance date to explicit IST/UTC instants. |
+| 2 | `compute_late_minutes` | Grace threshold checks only `minutes > 10`, so 09:40:01 is truncated to ten minutes and incorrectly not late. | Compare 09:40:00 and 09:40:01. | Compare elapsed seconds strictly to 600, then floor total minutes. |
+| 3 | `compute_work_hours` | Python `round` uses ties-to-even rather than required decimal half-up. | Values exactly halfway at two decimal places. | Use `Decimal` and `ROUND_HALF_UP`. |
+| 4 | `compute_overtime` | Uses midnight of the attendance date for every shift, so overnight shifts get the wrong shift-end instant. | 22:00–06:00 shift punched out at 06:40 next day. | Construct shift end on the next day for overnight shifts. |
+| 5 | `create_employee` | Check-then-insert is racy without a unique database constraint; server `datetime.now()` is naive and response omits epoch-ms conversion. | Send simultaneous duplicate creates; inspect `created_at`. | Enforce unique index, catch duplicate key, store UTC and return epoch ms. |
+| 6 | `list_employees` | `skip` starts at `page * page_size`, total ignores department filter, no sorting or bounds validation. | Request page 1 with 20 rows; filter by department. | Use `(page-1)*page_size`, filtered count, `emp_code` sort and validated bounds. |
+| 7 | `punch_in` | Does not handle unknown employee, uses host-local time, derives UTC date rather than IST attendance date, permits invalid statuses/timestamps, and check-then-insert permits duplicates. | Unknown code, WFH, timestamp near IST midnight, parallel same-day punches. | Validate input, explicit IST/UTC conversion, rule helpers, unique `(emp_code,date)` index. |
+| 8 | `punch_in` response | Returns a Mongo-generated `id`, although the contract identifies records by `(emp_code,date)` and excludes Mongo `_id`; times are not API milliseconds. | Inspect successful response. | Expose the natural key only and convert instants to epoch milliseconds. |
+| 9 | `list_attendance` | Loads every matching record into Python before paging, does not validate reversed dates, and scans all matches for total. | Large dataset or `date_from` later than `date_to`. | Validate dates and apply filters, sort, skip, limit and count in MongoDB. |
+| 10 | `list_attendance` | Sort omits the required `emp_code` tiebreaker; response leaks ObjectId as `id` and does not convert nested history instants. | Two employees share a date; inspect response. | Sort by date descending then code ascending; serialize only contract fields with all instants in ms. |
+| 11 | `list_attendance` | Returning legacy documents unchanged omits required `history` and `half_day` defaults. | Request the legacy sample record. | Normalize missing history to `[]` and half_day to `false`. |
+| 12 | App initialization and `/health` | The starter never creates indexes and reports healthy without checking MongoDB. | Start with no indexes or stop MongoDB then call health. | Create indexes idempotently at startup; ping MongoDB and return 503 on failure. |
+| 13 | Missing punch-out / regularization / analytics / explain routes | Most of the contract is not implemented. | Call any route marked “You” in the brief. | Implemented the remaining endpoints, aggregation pipelines, and explain route. |
+
+**Reviewed and retained:** `compute_work_hours` uses the correct elapsed-time formula, and the attendance natural key is the right identity. Both needed precision/concurrency fixes around them, but their basic choices were sound.
